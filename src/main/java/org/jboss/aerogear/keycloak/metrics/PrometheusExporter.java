@@ -19,6 +19,7 @@ public final class PrometheusExporter {
     private final static String USER_EVENT_PREFIX = "keycloak_user_event_";
     private final static String ADMIN_EVENT_PREFIX = "keycloak_admin_event_";
     private final static String PROVIDER_KEYCLOAK_OPENID = "keycloak";
+    private static final String UNKNOWN_CLIENT = "unknown_client";
 
     private final static PrometheusExporter INSTANCE = new PrometheusExporter();
 
@@ -42,21 +43,21 @@ public final class PrometheusExporter {
         totalLogins = Counter.build()
             .name("keycloak_logins")
             .help("Total successful logins")
-            .labelNames("realm", "provider")
+            .labelNames("realm", "client", "provider")
             .register();
 
         // package private by on purpose
         totalFailedLoginAttempts = Counter.build()
             .name("keycloak_failed_login_attempts")
             .help("Total failed login attempts")
-            .labelNames("realm", "provider", "error")
+            .labelNames("realm", "client", "provider", "error")
             .register();
 
         // package private by on purpose
         totalRegistrations = Counter.build()
             .name("keycloak_registrations")
             .help("Total registered users")
-            .labelNames("realm", "provider")
+            .labelNames("realm", "client", "provider")
             .register();
 
         // Counters for all user events
@@ -91,7 +92,7 @@ public final class PrometheusExporter {
         if (isAdmin) {
             counter.labelNames("realm", "resource").help("Generic KeyCloak Admin event");
         } else {
-            counter.labelNames("realm").help("Generic KeyCloak User event");
+            counter.labelNames("realm", "client").help("Generic KeyCloak User event");
         }
 
         return counter.register();
@@ -105,10 +106,10 @@ public final class PrometheusExporter {
     public void recordGenericEvent(final Event event) {
         final String counterName = buildCounterName(event.getType());
         if (counters.get(counterName) == null) {
-            logger.warnf("Counter for event type %s does not exist. Realm: %s", event.getType().name(), event.getRealmId());
+            logger.warnf("Counter for event type %s does not exist. Realm: %s, client: %s", event.getType().name(), event.getRealmId(), getClient(event));
             return;
         }
-        counters.get(counterName).labels(event.getRealmId()).inc();
+        counters.get(counterName).labels(event.getRealmId(), getClient(event)).inc();
     }
 
     /**
@@ -133,7 +134,7 @@ public final class PrometheusExporter {
     public void recordLogin(final Event event) {
         final String provider = getIdentityProvider(event);
 
-        totalLogins.labels(event.getRealmId(), provider).inc();
+        totalLogins.labels(event.getRealmId(), getClient(event), provider).inc();
     }
 
     /**
@@ -144,7 +145,7 @@ public final class PrometheusExporter {
     public void recordRegistration(final Event event) {
         final String provider = getIdentityProvider(event);
 
-        totalRegistrations.labels(event.getRealmId(), provider).inc();
+        totalRegistrations.labels(event.getRealmId(), getClient(event), provider).inc();
     }
 
 
@@ -156,7 +157,7 @@ public final class PrometheusExporter {
     public void recordLoginError(final Event event) {
         final String provider = getIdentityProvider(event);
 
-        totalFailedLoginAttempts.labels(event.getRealmId(), provider, event.getError()).inc();
+        totalFailedLoginAttempts.labels(event.getRealmId(), getClient(event), provider, event.getError()).inc();
     }
 
     /**
@@ -175,6 +176,21 @@ public final class PrometheusExporter {
             identityProvider = PROVIDER_KEYCLOAK_OPENID;
         }
         return identityProvider;
+    }
+
+    /**
+     * Retrieve the client id from event details or
+     * default to {@value #UNKNOWN_CLIENT}.
+     *
+     * @param event User event
+     * @return client id
+     */
+    private String getClient(Event event) {
+        String clientId = event.getClientId();
+        if (clientId == null) {
+            clientId = UNKNOWN_CLIENT;
+        }
+        return clientId;
     }
 
     /**
